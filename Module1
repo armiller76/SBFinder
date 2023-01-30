@@ -1,0 +1,142 @@
+Public Arr() As String      ' array to hold list of directories in which to search
+Public Counter As Long      ' current array index
+Public Row As Long          ' current spreadsheet row to write output
+
+' Call this subroutine from Immediate window for now. Eventually add a control to the actual
+' spreadsheet to launch this using values in the spreadsheet (or hard-coded?)
+Sub FindSBInSubDirs(PlanYearBegYear As Integer, RootPath As String)
+    Counter = 0
+    ReDim Arr(Counter)
+    Arr(Counter) = RootPath
+    Counter = Counter + 1
+    GetSubfolders (RootPath)
+    
+    Row = 2
+    For I = 0 To Counter - 1
+        Call FindAllSB(PlanYearBegYear, Arr(I), Row)
+    Next
+    MsgBox ("Done")
+End Sub
+
+' Recursively search for subdirectories and add to the array
+Function GetSubfolders(RootPath As String)
+    Dim FileSystemObject As Object
+    Dim CurrentFolder As Object
+    Dim SubFolder As Object
+    Dim FolderArray
+    
+    Set FileSystemObject = CreateObject("Scripting.FileSystemObject")
+    Set CurrentFolder = FileSystemObject.GetFolder(RootPath)
+    
+    For Each SubFolder In CurrentFolder.SUBFOLDERS
+        ReDim Preserve Arr(Counter)
+        Arr(Counter) = SubFolder.Path
+        Counter = Counter + 1
+        FolderArray = GetSubfolders(SubFolder.Path)
+    Next
+    
+    GetSubfolders = Arr
+    Set SubFolder = Nothing
+    Set CurrentFolder = Nothing
+    Set FileSystemObject = Nothing
+End Function
+
+' search specified directory for files matching criteria specified in function
+Function FindAllSB(PlanYearBegYear As Integer, SearchPath As String, RowToWrite As Long)
+
+    ' local variables
+    Dim FileSystem As Object
+    Dim Folder As Object
+    Dim File As Object
+    Dim PDFExtension As String
+    Dim SBInFileName As Boolean
+    Dim YearInFileNameGood As Boolean
+    Dim FileExtensionGood As Boolean
+    Dim NotFromPriorOCPlanYear As Boolean
+    Dim FileDate As Date
+    Dim FileCreatedAfterPlanYear As Boolean
+    Dim PYAsString4 As String ' Plan Year as 4-length string
+    Dim PYAsString2 As String ' Plan Year as 2-length string (i.e. for 2022, this would be 22)
+    Dim FilePathOnly As String ' Full path with filename removed
+            
+    PDFExtension = ".pdf"
+    PYAsString4 = CStr(PlanYearBegYear)
+    PYAsString2 = Right(PYAsString4, 2)
+    PriorOCYAsString = "-" & PYAsString2
+    CurrOCYAsString = "-" & Right(CStr(PlanYearBegYear + 1), 2)
+
+    ' set up an object to read file data
+    Set FileSystem = CreateObject("Scripting.FileSystemObject")
+    Set Folder = FileSystem.GetFolder(SearchPath)
+    
+    ' loop thru all files in current directory. if one matches our criteria, add it to the spreadsheet
+    For Each File In Folder.Files
+        SBInFileName = False
+        YearInFileNameGood = False
+        FileExtensionGood = False
+        FileCreatedAfterPlanYear = False
+        FileNameNoAttach = False
+        NotFromPriorOCPlanYear = False
+        FilePathOnly = Left(File.Path, Len(File.Path) - Len(File.Name))
+                
+        ' make sure filename contains some form of "SB"
+        If InStr(File.Name, "SB") <> 0 Then
+            SBInFileName = True
+        ElseIf InStr(File.Name, "sb") <> 0 Then
+            SBInFileName = True
+        ElseIf InStr(File.Name, "sB") <> 0 Then
+            SBInFileName = True
+        ElseIf InStr(File.Name, "Sb") <> 0 Then
+            SBInFileName = True
+        End If
+        
+        ' make sure filename contains relevant year
+        If InStr(File.Name, PYAsString4) <> 0 Then
+             YearInFileNameGood = True
+        ElseIf InStr(File.Name, PYAsString2) <> 0 Then
+             YearInFileNameGood = True
+        End If
+        
+        ' make sure not to add off-calendar year if it's from prior plan year
+        If InStr(File.Name, PriorOCYAsString) = 0 Then
+            NotFromPriorOCPlanYear = True
+        End If
+
+        ' make sure file extension is PDF
+        If InStr(File.Name, PDFExtension) <> 0 Then
+            FileExtensionGood = True
+        End If
+
+        ' make sure file was saved +/- one year from plan year?
+        FileDate = FileDateTime(File.Path)
+        If (Year(FileDate) - PlanYearBegYear) >= 0 Then
+            FileCreatedAfterPlanYear = True
+        End If
+        
+        ' check if the word "attach" exists in the file name and exclude it
+        If InStr(File.Name, "attach") = 0 Then
+            FileNameNoAttach = True
+        End If
+        
+        ' this should have already been caught, but also check for "-nn" where nn is the next
+        ' last two digits of the PYE for off calendar plans
+        If YearInFileNameGood = False Then ' only check if first date check failed
+            If InStr(File.Name, CurrOCYAsString) <> 0 Then
+                YearInFileNameGood = True
+            End If
+        End If
+
+        ' if all our of tests passed, this file name should be added to the spreadsheet
+        If SBInFileName = True And _
+           FileExtensionGood = True And _
+           YearInFileNameGood = True And _
+           FileCreatedAfterPlanYear = True And _
+           FileNameNoAttach = True And _
+           NotFromPriorOCPlanYear = True Then
+            Cells(Row, 1) = File.Name
+            Cells(Row, 2) = FilePathOnly
+            Cells(Row, 3) = File.DateLastModified
+            Row = Row + 1
+        End If
+    Next
+End Function
